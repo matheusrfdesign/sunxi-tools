@@ -49,6 +49,11 @@ spi_flash_info_t spi_flash_info[] = {
 	  .small_erase_cmd = 0x20, .small_erase_size =  4 * 1024,
 	  .program_cmd = 0x02, .program_size = 256,
 	  .text_description = "Macronix MX25Lxxxx" },
+	{ .id = 0xC8F1, .write_enable_cmd = 0x6,
+	  .large_erase_cmd = 0xD8, .large_erase_size = 128 * 1024,
+	  .small_erase_cmd = 0x00, .small_erase_size = 0,
+	  .program_cmd = 0x02, .program_size = 2176,
+	  .text_description = "Gigadevices 5F1G" },
 };
 
 spi_flash_info_t default_spi_flash_info = {
@@ -464,7 +469,8 @@ void aw_fel_spiflash_info(feldev_handle *dev)
 {
 	soc_info_t *soc_info = dev->soc_info;
 	const char *manufacturer;
-	unsigned char buf[] = { 0, 4, 0x9F, 0, 0, 0, 0x0, 0x0 };
+	unsigned char buff[] = { 0, 4, 0x9F, 0, 0, 0, 0x0, 0x0 };
+	unsigned char * buf = buff;
 	void *backup = backup_sram(dev);
 
 	spi0_init(dev);
@@ -474,12 +480,19 @@ void aw_fel_spiflash_info(feldev_handle *dev)
 	aw_fel_read(dev, soc_info->spl_addr, buf, sizeof(buf));
 
 	restore_sram(dev, backup);
+	
+	if (buf[3] == 0x00) {
+		/* GD5F1GQ4AUY's first byte is zero */
+		buf = &buf[1];
+	}
 
 	/* Assume that the MISO pin is either pulled up or down */
-	if (buf[5] == 0x00 || buf[5] == 0xFF) {
+	if (!buf[3] && (buf[5] == 0x00 || buf[5] == 0xFF)) {
 		printf("No SPI flash detected.\n");
 		return;
 	}
+
+	size_t mem_size = (1 << buf[5]);
 
 	switch (buf[3]) {
 	case 0xEF:
@@ -488,13 +501,17 @@ void aw_fel_spiflash_info(feldev_handle *dev)
 	case 0xC2:
 		manufacturer = "Macronix";
 		break;
+	case 0xC8:
+		manufacturer = "Gigadevice";
+		if (buf[4] == 0xF1) mem_size = 128 * 1024 * 1024;
+		break;
 	default:
 		manufacturer = "Unknown";
 		break;
 	}
 
-	printf("Manufacturer: %s (%02Xh), model: %02Xh, size: %d bytes.\n",
-	       manufacturer, buf[3], buf[4], (1 << buf[5]));
+	printf("Manufacturer: %s (%02Xh), model: %02Xh, size: %ld bytes.\n",
+	       manufacturer, buf[3], buf[4], mem_size);
 }
 
 /*
